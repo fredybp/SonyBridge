@@ -100,12 +100,7 @@ final class HeadphonesModel: ObservableObject {
 
     func refreshStatus() {
         bridge.refreshStatus {
-            self.batteryLevel = self.bridge.batteryLevel
-            self.batteryCharging = self.bridge.batteryCharging
-            self.hasDualBattery = self.bridge.hasDualBattery
-            self.batteryLeft = self.bridge.batteryLeft
-            self.batteryRight = self.bridge.batteryRight
-            self.batteryCase = self.bridge.batteryCase
+            self.syncBatteryFromBridge()
             self.eqPreset = self.bridge.eqPreset
             self.clearBass = self.bridge.clearBass
             self.dsee = self.bridge.dsee
@@ -120,6 +115,15 @@ final class HeadphonesModel: ObservableObject {
             self.adaptiveVolume = self.bridge.adaptiveVolume
             self.syncMultipointFromBridge()
         }
+    }
+
+    private func syncBatteryFromBridge() {
+        batteryLevel = bridge.batteryLevel
+        batteryCharging = bridge.batteryCharging
+        hasDualBattery = bridge.hasDualBattery
+        batteryLeft = bridge.batteryLeft
+        batteryRight = bridge.batteryRight
+        batteryCase = bridge.batteryCase
     }
 
     func refreshMultipoint() {
@@ -189,9 +193,15 @@ final class HeadphonesModel: ObservableObject {
             guard let self = self, self.connected else { return }
             // Every 5th tick (10 s), also re-read which device has playback, so the menu-bar icon follows
             // changes made from the phone. Skipped while a multipoint write or refresh is in flight.
+            // The battery reads the same way below. All of it runs while the window is closed too, since
+            // the model is shared with the menu-bar item.
             tick += 1
             if tick % 5 == 0 && self.hasPairedDevices && !self.multipointBusy && !self.refreshingMultipoint {
                 self.bridge.refreshMultipoint { self.syncMultipointFromBridge() }
+            }
+            // Every 30 s, re-read the battery (the bridge skips this on v1 devices).
+            if tick % 15 == 0 {
+                self.bridge.refreshBattery { self.syncBatteryFromBridge() }
             }
             self.bridge.refreshDynamic {
                 self.mode = self.bridge.mode

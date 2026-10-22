@@ -19,6 +19,7 @@ private enum Theme {
 struct ContentView: View {
     @StateObject private var model = HeadphonesModel.shared
     @State private var showAbout = false
+    @AppStorage(DockPresence.defaultsKey) private var showInDock = true
 
     var body: some View {
         ZStack {
@@ -584,6 +585,14 @@ struct ContentView: View {
             if !model.protocolVersion.isEmpty { aboutRow("Protocol", model.protocolVersion) }
             if !model.deviceMac.isEmpty { aboutRow("Bluetooth", model.deviceMac) }
             Divider().background(Theme.cardHi).padding(.vertical, 10)
+            Toggle(isOn: Binding(get: { showInDock }, set: { DockPresence.set($0) })) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Show in Dock").font(.system(size: 12, weight: .medium)).foregroundColor(.white)
+                    Text("Off: lives only in the menu bar").font(.system(size: 10)).foregroundColor(Theme.secondary)
+                }
+            }
+            .toggleStyle(SwitchToggleStyle(tint: Theme.accent))
+            Divider().background(Theme.cardHi).padding(.vertical, 10)
             Text("SonyBridge · not affiliated with Sony")
                 .font(.system(size: 10))
                 .foregroundColor(Theme.secondary.opacity(0.7))
@@ -619,6 +628,29 @@ struct ContentView: View {
 
 // MARK: - Menu bar
 
+// Whether the app shows in the Dock (with its app menus) or lives only in the menu bar. Stored in
+// UserDefaults and applied at launch by MenuBarController.install().
+enum DockPresence {
+    static let defaultsKey = "showInDock"
+
+    static var showInDock: Bool {
+        UserDefaults.standard.object(forKey: defaultsKey) as? Bool ?? true
+    }
+
+    static func set(_ show: Bool) {
+        UserDefaults.standard.set(show, forKey: defaultsKey)
+        apply()
+    }
+
+    static func apply() {
+        NSApp.setActivationPolicy(showInDock ? .regular : .accessory)
+        // Switching to .accessory deactivates the app; keep a visible window in front.
+        if NSApp.windows.contains(where: { $0.isVisible }) {
+            NSApp.activate(ignoringOtherApps: true)
+        }
+    }
+}
+
 // Status-bar item for pinning playback to this Mac without opening the window. Installed once from
 // AppDelegate; reads and drives the same HeadphonesModel as the window. The icon shows the playback device
 // next to the headphones (phone, computer, or its multipoint slot number), and the headphones fill in
@@ -633,6 +665,7 @@ struct ContentView: View {
     @objc static func install() {
         guard instance == nil else { return }
         instance = MenuBarController()
+        DockPresence.apply()
     }
 
     private override init() {
@@ -673,12 +706,25 @@ struct ContentView: View {
         let device = playbackDevice
         statusItem.button?.image = Self.icon(base: base, accessory: device.map(playbackSymbol(for:)))
         statusItem.button?.appearsDisabled = !model.connected
+        var tooltip = [String]()
         if let device = device {
             let name = device.name.isEmpty ? device.address : device.name
-            statusItem.button?.toolTip = "Playing on \(name)" + (model.playbackPinned ? " (fixed)" : "")
+            tooltip.append("Playing on \(name)" + (model.playbackPinned ? " (fixed)" : ""))
         } else {
-            statusItem.button?.toolTip = model.connected ? model.deviceName : "SonyBridge"
+            tooltip.append(model.connected ? model.deviceName : "SonyBridge")
         }
+        if let battery = batteryText { tooltip.append("Battery \(battery)") }
+        statusItem.button?.toolTip = tooltip.joined(separator: "\n")
+    }
+
+    // "80%", "80% ⚡", or "L 80% · R 75%" for earbuds; nil until the first battery read.
+    private var batteryText: String? {
+        guard model.connected else { return nil }
+        if model.hasDualBattery {
+            return "L \(model.batteryLeft)% · R \(model.batteryRight)%"
+        }
+        guard model.batteryLevel >= 0 else { return nil }
+        return "\(model.batteryLevel)%" + (model.batteryCharging ? " ⚡" : "")
     }
 
     // Draws the headphones symbol with an optional second symbol beside it, as one template image.
@@ -711,7 +757,7 @@ struct ContentView: View {
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
         if model.connected {
-            menu.addItem(disabledItem(model.deviceName))
+            menu.addItem(disabledItem([model.deviceName, batteryText].compactMap { $0 }.joined(separator: " · ")))
             if model.hasPlaybackPinState {
                 if thisMac != nil {
                     let pin = actionItem(pinnedToThisMac ? "Playback Fixed to This Mac" : "Pin Playback to This Mac",
@@ -744,6 +790,9 @@ struct ContentView: View {
             menu.addItem(connect)
         }
         menu.addItem(.separator())
+        let dock = actionItem("Show in Dock", #selector(toggleDock))
+        dock.state = DockPresence.showInDock ? .on : .off
+        menu.addItem(dock)
         menu.addItem(actionItem("Open SonyBridge", #selector(openWindow)))
         menu.addItem(actionItem("Quit SonyBridge", #selector(quit), key: "q"))
     }
@@ -760,6 +809,10 @@ struct ContentView: View {
     @objc private func connectHeadphones() {
         NSApp.activate(ignoringOtherApps: true)
         model.connect()
+    }
+
+    @objc private func toggleDock() {
+        DockPresence.set(!DockPresence.showInDock)
     }
 
     @objc private func openWindow() {

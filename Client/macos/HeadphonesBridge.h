@@ -108,6 +108,10 @@ typedef NS_ENUM(NSInteger, SHCAmbientMode) {
 // own button show up in the app. Called on a timer while connected.
 - (void)refreshDynamicWithCompletion:(void (^)(void))completion;
 
+// Re-reads the battery level(s) on v2 devices; completion on main. No-op on v1, where the battery
+// opcode (0x22) means power-off.
+- (void)refreshBatteryWithCompletion:(void (^)(void))completion;
+
 // Re-reads the paired-device list, pinned state and multipoint switch (GETs only); completion on main.
 - (void)refreshMultipointWithCompletion:(void (^)(void))completion;
 
