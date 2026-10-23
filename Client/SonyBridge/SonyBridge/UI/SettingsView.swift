@@ -3,15 +3,34 @@
 //  Settings window: app options and details about the connected headset.
 //
 
+import ServiceManagement
 import SwiftUI
 
 struct SettingsView: View {
     @Environment(HeadphonesController.self) private var headphones
     @AppStorage(DockPresence.defaultsKey) private var showInDock = true
+    // Read from the system each time Settings opens; the user can also change it in System Settings.
+    @State private var loginItemStatus = SMAppService.mainApp.status
+    @State private var loginItemError: String?
 
     var body: some View {
         Form {
             Section("General") {
+                Toggle(isOn: Binding(get: { loginItemStatus == .enabled }, set: setOpenAtLogin)) {
+                    Text("Open at Login")
+                    Text("Start SonyBridge when you log in. With Connect automatically on, it connects by itself.")
+                }
+                if loginItemStatus == .requiresApproval {
+                    LabeledContent("macOS needs your approval in Login Items.") {
+                        Button("Open Login Items") {
+                            SMAppService.openSystemSettingsLoginItems()
+                        }
+                    }
+                }
+                if let loginItemError {
+                    Text(loginItemError)
+                        .foregroundStyle(.red)
+                }
                 Toggle(isOn: Binding(get: { showInDock }, set: { DockPresence.set($0) })) {
                     Text("Show in Dock")
                     Text("When off, SonyBridge lives only in the menu bar.")
@@ -50,5 +69,23 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .frame(width: 440)
         .fixedSize(horizontal: false, vertical: true)
+        .onAppear {
+            loginItemStatus = SMAppService.mainApp.status
+        }
+    }
+
+    // Registers this copy of the app (its current location) as a login item.
+    private func setOpenAtLogin(_ enabled: Bool) {
+        loginItemError = nil
+        do {
+            if enabled {
+                try SMAppService.mainApp.register()
+            } else {
+                try SMAppService.mainApp.unregister()
+            }
+        } catch {
+            loginItemError = error.localizedDescription
+        }
+        loginItemStatus = SMAppService.mainApp.status
     }
 }
