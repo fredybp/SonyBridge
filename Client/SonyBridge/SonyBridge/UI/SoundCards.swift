@@ -17,12 +17,12 @@ struct AmbientCard: View {
             }
 
             if headphones.ambientMode == .ambientSound {
-                LabeledContent {
+                HStack {
+                    Text("Ambient Sound Level")
+                    Spacer()
                     Text("\(headphones.ambientLevel)")
                         .monospacedDigit()
                         .foregroundStyle(.secondary)
-                } label: {
-                    Text("Ambient Sound Level")
                 }
                 Slider(value: Binding(get: { Double(headphones.ambientLevel) },
                                       set: { headphones.setAmbientLevel(Int($0.rounded())) }),

@@ -36,23 +36,29 @@ struct DevicesCard: View {
     }
 
     @ViewBuilder private var content: some View {
+        // Plain rows rather than LabeledContent, which only right-aligns its value inside a Form.
         if let enabled = headphones.multipointEnabled {
-            LabeledContent("Connect to 2 devices", value: enabled ? "On" : "Off")
+            HStack {
+                Text("Connect to 2 devices")
+                Spacer()
+                Text(enabled ? "On" : "Off")
+                    .foregroundStyle(.secondary)
+            }
         }
         if let fixed = headphones.playbackFixed {
-            LabeledContent {
-                Button(fixed ? "Unfix" : "Fix") {
-                    headphones.setPlaybackFixed(!fixed)
-                }
-                .buttonStyle(.bordered)
-                .disabled(headphones.multipointBusy)
-            } label: {
+            HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Playback device")
                     Text(fixed ? "Fixed" : "Switches automatically")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                Spacer()
+                Button(fixed ? "Unfix" : "Fix") {
+                    headphones.setPlaybackFixed(!fixed)
+                }
+                .buttonStyle(.bordered)
+                .disabled(headphones.multipointBusy)
             }
         }
 
