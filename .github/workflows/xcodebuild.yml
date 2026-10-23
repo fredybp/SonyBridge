@@ -3,53 +3,44 @@ name: macOS
 on:
   push:
     branches:
-    - master
+    - main
+    - 'feature/**'
   pull_request:
     branches:
-    - master
+    - main
+  workflow_dispatch:
 
 jobs:
   build:
-    strategy:
-      matrix:
-        os: ["macos-latest"]
-        include:
-          - os: macos-latest
-            binary_path: Client/build/SonyHeadphonesClient.zip
-            artifact_name: "SonyHeadphonesClient-macOS.zip"
-    runs-on: ${{ matrix.os }}
+    # The Swift app targets macOS 26 and uses Xcode 27's project format.
+    runs-on: macos-26
+    env:
+      # CI has no signing team: sign ad-hoc, which keeps the app's entitlements (sandbox + Bluetooth).
+      SIGNING: CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM=
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
+
+    - name: Select Xcode 27
+      uses: maxim-lobanov/setup-xcode@v1
       with:
-        submodules: true
+        xcode-version: '27'
 
-    - name: Create build directory
-      working-directory: ${{github.workspace}}/Client
-      run: mkdir build
+    - name: Test
+      working-directory: ${{github.workspace}}/Client/SonyBridge
+      run: xcodebuild test -project SonyBridge.xcodeproj -scheme SonyBridge -destination 'platform=macOS' $SIGNING
 
-    - name: Build
-      working-directory: ${{github.workspace}}/Client/build
-      # Execute the build.
-      run: xcodebuild -project '../macos/SonyHeadphonesClient.xcodeproj' -config Release -scheme 'SonyHeadphonesClient' -archivePath ./archive archive | xcpretty
+    - name: Build the release app
+      working-directory: ${{github.workspace}}/Client/SonyBridge
+      run: xcodebuild build -project SonyBridge.xcodeproj -scheme SonyBridge -configuration Release -destination 'generic/platform=macOS' -derivedDataPath build $SIGNING
 
-    - name: Export archive to .app
-      working-directory: ${{github.workspace}}/Client/build
-      # Exports the archive to a .app file
-      run: xcodebuild -exportArchive -archivePath ./archive.xcarchive -exportPath ./ -exportOptionsPlist ../macos/exportOptions.plist | xcpretty
+    - name: Zip the app
+      working-directory: ${{github.workspace}}/Client/SonyBridge/build/Build/Products/Release
+      run: ditto -c -k --keepParent SonyBridge.app SonyBridge-macOS.zip
 
-    - name: Zip the exported file
-      working-directory: ${{github.workspace}}/Client/build
-      # Zip the application for easier downloading
-      run: zip -r SonyHeadphonesClient.zip SonyHeadphonesClient.app
-
-    - name: Upload the zipped application
-      uses: actions/upload-artifact@v3
+    - name: Upload the zipped app
+      uses: actions/upload-artifact@v4
       with:
-        # Artifact name
-        name: ${{ matrix.artifact_name }}
-        # A file, directory or wildcard pattern that describes what to upload
-        path: ${{github.workspace}}/${{matrix.binary_path}}
-        # The desired behavior if no files are found using the provided path.
-
-
+        name: SonyBridge-macOS
+        path: ${{github.workspace}}/Client/SonyBridge/build/Build/Products/Release/SonyBridge-macOS.zip
+        if-no-files-found: error

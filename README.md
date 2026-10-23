@@ -44,8 +44,8 @@ reverse-engineered binary protocol — no phone required.
 
 The original [SonyHeadphonesClient](https://github.com/Plutoberth/SonyHeadphonesClient) only spoke Sony's
 **first-generation** protocol, so newer headsets (WH-CH720N, XM4/XM5, WF-series, LinkBuds…) just timed
-out on connect. SonyBridge adds full **second-generation ("v2") protocol** support, a native SwiftUI app
-on macOS, and a matching modern UI on Windows/Linux.
+out on connect. SonyBridge adds full **second-generation ("v2") protocol** support, a native Swift and
+SwiftUI app on macOS, and a matching modern UI on Windows/Linux.
 
 ## ✨ Features
 
@@ -60,7 +60,14 @@ on macOS, and a matching modern UI on Windows/Linux.
 - 🔄 **Live button sync** — changes made on the headset reflect in the app
 - 🔌 **Auto-connect** to your already-paired Sony headset
 - 🧬 **Dual-protocol** — auto-detects and speaks either protocol generation
-- 🌑 **Modern UI** — dark, minimal, shaped after Sony's own app (SwiftUI on macOS, Dear ImGui on Windows/Linux)
+- 🔀 **Multipoint** *(macOS)* — see the connected and paired devices, which one has playback, switch playback
+  to another device, and **fix (pin) it** — Sound Connect's "Switch playback device and fix", e.g. to keep a
+  call on your Mac so your phone can't take the headphones over
+- 📍 **Menu-bar item** *(macOS)* — *Pin Playback to This Mac* in one click; the icon shows which device is
+  playing (phone, computer, or its slot) and the battery
+- 🫥 **Menu-bar-only mode** *(macOS)* — hide SonyBridge from the Dock
+- 🪟 **Modern UI** — on macOS a native SwiftUI app with Liquid Glass (macOS 26); on Windows/Linux a dark,
+  minimal Dear ImGui UI shaped after Sony's own app
 
 ## 📥 Download
 
@@ -77,7 +84,7 @@ on macOS, and a matching modern UI on Windows/Linux.
 or [**Download .app**](https://github.com/AmitRajput-Dev/SonyBridge/releases/latest)
 
 </td>
-<td>macOS 11+ · Apple Silicon &amp; Intel</td>
+<td>macOS 26+ for the current Swift app (<a href="#-build-from-source">build from source</a>) · releases before it run on macOS 11+ · Apple Silicon &amp; Intel</td>
 </tr>
 <tr>
 <td><b>Windows</b></td>
@@ -119,27 +126,33 @@ first time (`brew trust AmitRajput-Dev/tap`).
 
 | Status | Devices |
 |--------|---------|
-| ✅ **Verified** | WH-CH720N, Sony ULT WEAR (WH-ULT900N) |
-| 🟢 **Expected** (v2, over-ear — NC/Ambient/battery/EQ) | WH-1000XM5, WH-1000XM6, WH-XB910N, WH-CH520 |
+| ✅ **Verified** | WH-CH720N, Sony ULT WEAR (WH-ULT900N), WH-1000XM5 (incl. multipoint, fw 2.5.1) |
+| 🟢 **Expected** (v2, over-ear — NC/Ambient/battery/EQ) | WH-1000XM6, WH-XB910N, WH-CH520 |
 | 🟡 **v2 earbuds** (controls work; battery format differs) | WF-1000XM4, WF-1000XM5, WF-C700N, LinkBuds S |
 | 🔵 **Legacy** (v1 protocol — NC/Ambient only) | WH-1000XM4, WH-1000XM3, WH-1000XM2, WH-XB900N, MDR-XB950BT |
 
-> Only the WH-CH720N is fully hardware-verified. Others share the same protocol family, so the basics
-> should work — per-model quirks are untested. Reports and PRs for other devices are very welcome.
+> The verified models were tested on real hardware. Others share the same protocol family, so the basics
+> should work — per-model quirks are untested. Multipoint needs a v2 headset that advertises it; the app
+> only shows what the headset answers. Reports and PRs for other devices are very welcome — the Devices
+> card's *Copy diagnostics* gives a hex log of the multipoint exchange to attach.
 
 ## 🚀 Build from source
 
 <details>
-<summary><b>macOS (native SwiftUI app)</b></summary>
+<summary><b>macOS (native Swift app)</b></summary>
 
-Requires **Xcode 14+**.
+Requires **Xcode 27** (the project uses Xcode 27's project format) and runs on **macOS 26** or later.
 
 ```sh
-git clone --recurse-submodules https://github.com/AmitRajput-Dev/SonyBridge.git
-open SonyBridge/Client/macos/SonyHeadphonesClient.xcodeproj
+git clone https://github.com/AmitRajput-Dev/SonyBridge.git
+open SonyBridge/Client/SonyBridge/SonyBridge.xcodeproj
 ```
 
-Then ⌘R.
+In the **SonyBridge** target's *Signing & Capabilities*, pick your own team (a free personal team works) or
+*Sign to Run Locally*, then ⌘R. ⌘U runs the tests. With a real team macOS remembers the Bluetooth permission
+across builds; ad-hoc builds ask again each time.
+
+The macOS app is pure Swift and doesn't use the C++ code in `Client/`, which the Windows and Linux builds use.
 </details>
 
 <details>
@@ -178,6 +191,15 @@ init handshake and per-frame host-ACK the newer devices require, plus battery, E
 Protocol byte layouts were cross-referenced against
 [**GadgetBridge**](https://codeberg.org/Freeyourgadget/Gadgetbridge)'s Sony implementation.
 
+v2 headsets have two separate command tables, told apart by the frame type: `0x0c` for most settings and
+`0x0e` for multipoint (device list, playback switching, fixing). The same opcode means different things in
+each — in the first table `0x30`–`0x3f` are firmware-update commands — so every command is only ever sent on
+its own table, and a setting is only changed after the headset has answered the matching read.
+
+On macOS this all lives in Swift under `Client/SonyBridge/SonyBridge/`: `Protocol/` (framing, commands,
+reply parsers), `Transport/` (RFCOMM and the request/ACK layer) and `Headphones/` (the app model), with tests
+in `SonyBridgeTests/` that replay real headset replies. Windows and Linux use the C++ core in `Client/`.
+
 ## 🤝 Contributing
 
 Contributions are very welcome — especially **device reports** and **testing on real hardware**.
@@ -193,6 +215,8 @@ SonyBridge builds directly on the work of:
 - [**SonyHeadphonesClient**](https://github.com/Plutoberth/SonyHeadphonesClient) by Plutoberth, Mr-M33533K5 &amp; contributors — the original cross-platform client and protocol foundation
 - [**semvis123**](https://github.com/semvis123) — the original macOS port
 - [**GadgetBridge**](https://codeberg.org/Freeyourgadget/Gadgetbridge) — reverse-engineered v2 protocol reference
+- [**mos9527/SonyHeadphonesClient**](https://github.com/mos9527/SonyHeadphonesClient) and
+  [**nullpoint**](https://github.com/mehrshaad/nullpoint) — the multipoint (command table 2) protocol layouts
 
 **Community contributors & testers:**
 
