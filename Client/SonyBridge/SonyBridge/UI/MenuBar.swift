@@ -71,6 +71,10 @@ struct MenuBarLabel: View {
         Image(nsImage: MenuBarIcon.image(base: headphones.pinnedToThisMac ? "headphones.circle.fill" : "headphones",
                                          accessory: headphones.isConnected ? headphones.playbackDevice.map { MenuBarIcon.symbol(for: $0) } : nil))
             .help(tooltip)
+            // The menu-bar label exists from launch even with the window closed, so auto-connect starts here.
+            .task {
+                headphones.connectAutomatically()
+            }
     }
 
     private var tooltip: String {

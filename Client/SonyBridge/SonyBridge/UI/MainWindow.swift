@@ -40,6 +40,7 @@ struct MainWindow: View {
 
 private struct DisconnectedView: View {
     @Environment(HeadphonesController.self) private var headphones
+    @AppStorage(HeadphonesController.autoConnectDefaultsKey) private var connectAutomatically = true
 
     var body: some View {
         ContentUnavailableView {
@@ -52,14 +53,26 @@ private struct DisconnectedView: View {
                 Text("Connect your headphones in Bluetooth settings first, and keep audio playing.")
             }
         } actions: {
-            Button(headphones.state == .connecting ? "Connecting…" : "Connect Headphones", action: headphones.connect)
+            // On macOS the actions are laid out side by side; stack them so nothing gets pushed off screen.
+            VStack(spacing: 12) {
+                Button(headphones.state == .connecting ? "Connecting…" : "Connect Headphones") {
+                    headphones.connect()
+                }
                 .buttonStyle(.glassProminent)
                 .controlSize(.large)
                 .disabled(headphones.state == .connecting)
-            if headphones.bluetoothDenied {
-                Button("Open Bluetooth Settings", action: BluetoothPermission.openSettings)
-                    .buttonStyle(.glass)
+                if headphones.bluetoothDenied {
+                    Button("Open Bluetooth Settings", action: BluetoothPermission.openSettings)
+                        .buttonStyle(.glass)
+                }
+                Toggle("Connect automatically", isOn: $connectAutomatically)
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 4)
+                    .help("When SonyBridge opens, connect to a Sony headset that's already connected to this Mac")
             }
+            .fixedSize()
         }
     }
 }

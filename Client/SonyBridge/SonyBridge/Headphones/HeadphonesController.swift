@@ -72,6 +72,7 @@ final class HeadphonesController {
     // Writes get longer than reads: the headset may push device-list notifications before it answers.
     @ObservationIgnored var multipointWriteTimeout: Duration = .seconds(5)
     @ObservationIgnored private var connectTask: Task<Void, Never>?
+    @ObservationIgnored private var autoConnectTried = false
     @ObservationIgnored private var pollingTask: Task<Void, Never>?
     @ObservationIgnored private weak var transport: MDRTransport?
 
@@ -81,7 +82,27 @@ final class HeadphonesController {
 
     // MARK: - Connecting
 
-    func connect() {
+    // The "Connect automatically" toggle on the connect screen (on by default).
+    static let autoConnectDefaultsKey = "connectAutomatically"
+
+    // On launch, if the toggle is on: connect quietly to a Sony headset macOS already has connected. Never
+    // shows the permission prompt or the device picker, and stays quiet if no headset is there. Not when
+    // hosting unit tests.
+    func connectAutomatically() {
+        guard !autoConnectTried, state == .disconnected else {
+            return
+        }
+        autoConnectTried = true
+        guard UserDefaults.standard.object(forKey: Self.autoConnectDefaultsKey) as? Bool ?? true,
+              BluetoothPermission.isGranted,
+              ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else {
+            return
+        }
+        connect(interactive: false)
+    }
+
+    // interactive: may ask for Bluetooth permission and show the device picker, and reports when nothing is found.
+    func connect(interactive: Bool = true) {
         guard state == .disconnected else {
             return
         }
@@ -99,7 +120,7 @@ final class HeadphonesController {
             }
             // Let SwiftUI draw "Connecting…" before the modal picker can block the main thread.
             await Task.yield()
-            guard let device = HeadsetFinder.findHeadset() else {
+            guard let device = interactive ? HeadsetFinder.findHeadset() : HeadsetFinder.connectedHeadset() else {
                 state = .disconnected
                 return
             }

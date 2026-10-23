@@ -25,6 +25,11 @@ enum BluetoothPermission {
         }
     }
 
+    // Without prompting.
+    static var isGranted: Bool {
+        CBManager.authorization == .allowedAlways
+    }
+
     static func openSettings() {
         if let settingsURL {
             NSWorkspace.shared.open(settingsURL)

@@ -164,8 +164,7 @@ enum HeadsetFinder {
     // Prefers a Sony headset macOS already has connected (Sound Connect's "My Device" behaviour); otherwise
     // shows the system Bluetooth picker. Returns nil if the user cancels the picker.
     static func findHeadset() -> IOBluetoothDevice? {
-        let paired = (IOBluetoothDevice.pairedDevices() as? [IOBluetoothDevice]) ?? []
-        if let connected = paired.first(where: { $0.isConnected() && looksLikeSonyHeadset($0.name) }) {
+        if let connected = connectedHeadset() {
             return connected
         }
         guard let selector = IOBluetoothDeviceSelectorController.deviceSelector(),
@@ -173,6 +172,12 @@ enum HeadsetFinder {
             return nil
         }
         return selector.getResults()?.last as? IOBluetoothDevice
+    }
+
+    // A Sony headset macOS already has connected, without any UI.
+    static func connectedHeadset() -> IOBluetoothDevice? {
+        let paired = (IOBluetoothDevice.pairedDevices() as? [IOBluetoothDevice]) ?? []
+        return paired.first { $0.isConnected() && looksLikeSonyHeadset($0.name) }
     }
 
     static var hostAddress: String {
