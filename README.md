@@ -79,7 +79,7 @@ SwiftUI app on macOS, and a matching modern UI on Windows/Linux.
 <td><b>macOS</b></td>
 <td>
 
-`brew tap AmitRajput-Dev/tap && brew install --cask sonybridge`
+`brew install --cask amitrajput-dev/tap/sonybridge`
 
 or [**Download .app**](https://github.com/AmitRajput-Dev/SonyBridge/releases/latest)
 
