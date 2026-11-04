@@ -42,7 +42,7 @@ struct SettingsView: View {
                     if let battery = headphones.battery {
                         LabeledContent("Battery", value: BatteryIcon.text(for: battery))
                         if let caseLevel = battery.caseLevel {
-                            LabeledContent("Case", value: "\(caseLevel)%")
+                            LabeledContent("Case", value: "\(caseLevel)%" + (battery.caseCharging ? " charging" : ""))
                         }
                     }
                     if let codec = headphones.codec {

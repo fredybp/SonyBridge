@@ -106,6 +106,7 @@ struct SonyReplyTests {
         #expect(SonyReply.battery(hex("23 00 50 01"))?.level == 80)
         #expect(SonyReply.battery(hex("23 00 50 01"))?.charging == true)
         #expect(SonyReply.dualBattery(hex("23 09 46 00 3c 00"))?.right == 60)
+        #expect(SonyReply.ambientV2(hex("67 17 01 01 01 01 0c")) != nil)
         let equalizer = try #require(SonyReply.equalizer(hex("57 00 a0 06 0a 00 05 0a 0f 14")))
         #expect(equalizer.preset == 0xa0)
         #expect(equalizer.clearBass == 0)

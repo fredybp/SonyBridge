@@ -65,17 +65,37 @@ extension HeadphonesController {
         }
         equalizer?.preset = preset.rawValue
         errorMessage = nil
-        Task { await send(SonyCommand.setEqualizerPreset(preset)) }
+        let command = SonyCommand.setEqualizerPreset(preset, tenBand: tenBandEqualizer)
+        let generation = self.generation
+        Task {
+            await send(command)
+            // The bands that go with a preset live on the headset: Manual restores the curve last stored there,
+            // and every other preset has its own. Without this read the sliders keep the previous preset's
+            // values, and touching one writes them over the stored curve. Skipped if the user has moved on.
+            guard isCurrent(generation), equalizer?.preset == preset.rawValue else {
+                return
+            }
+            await refreshEqualizer()
+        }
     }
 
-    // Manual EQ: selects the Manual preset with the current clear bass and band values.
+    // Manual EQ: selects the Manual preset with these values. Standard layout: clear bass and five bands in
+    // -10...10. Ten-band layout (WH-1000XM6): ten raw steps in 0...12, and clearBass is ignored.
     func setCustomEqualizer(clearBass: Int, bands: [Int]) {
         guard isV2, equalizer != nil else {
             return
         }
-        equalizer = EqualizerState(preset: EqualizerPreset.manual.rawValue, clearBass: clearBass, bands: bands)
+        let command: [UInt8]
+        if tenBandEqualizer {
+            let raw = bands.map { max(0, min(12, $0)) }
+            equalizer = EqualizerState(preset: EqualizerPreset.manual.rawValue, clearBass: nil, bands: raw)
+            command = SonyCommand.setTenBandEqualizer(bands: raw)
+        } else {
+            equalizer = EqualizerState(preset: EqualizerPreset.manual.rawValue, clearBass: clearBass, bands: bands)
+            command = SonyCommand.setCustomEqualizer(clearBass: clearBass, bands: bands)
+        }
         errorMessage = nil
-        Task { await send(SonyCommand.setCustomEqualizer(clearBass: clearBass, bands: bands)) }
+        Task { await send(command) }
     }
 
     func setDsee(_ enabled: Bool) {

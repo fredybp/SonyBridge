@@ -106,17 +106,32 @@ nonisolated enum AutoPowerOff: Int, CaseIterable, Identifiable, Sendable {
 }
 
 nonisolated struct BatteryStatus: Equatable, Sendable {
-    var level: Int
+    // The headline level: the emptier earbud that is reporting on TWS models. nil only when both earbuds
+    // are in the case.
+    var level: Int?
     var charging: Bool
-    // TWS earbuds only.
+    // TWS earbuds only. An earbud's level is nil while it is docked in the case (it reports 0 then).
+    var earbuds = false
     var left: Int?
+    var leftCharging = false
     var right: Int?
+    var rightCharging = false
     var caseLevel: Int?
+    var caseCharging = false
+}
+
+// 23 09|01 <left> <left charging> <right> <right charging> [...]
+nonisolated struct EarbudBatteryReading: Equatable, Sendable {
+    var left: Int?
+    var leftCharging: Bool
+    var right: Int?
+    var rightCharging: Bool
 }
 
 nonisolated struct EqualizerState: Equatable, Sendable {
     var preset: UInt8
     var clearBass: Int?
+    // Five bands in -10...10 on the standard layout; ten raw steps in 0...12 on the WH-1000XM6.
     var bands: [Int]?
 }
 
@@ -233,11 +248,20 @@ nonisolated enum SonyOpcode {
 }
 
 nonisolated enum SonySubtype {
+    // A headset only answers the battery sub-types it has, so they are probed. TWS earbuds report dual
+    // (dual2 on the WF-C500/C510/C700N line) plus the case; everything else reports single.
     static let batterySingle: UInt8 = 0x00
+    static let batteryDual2: UInt8 = 0x01
     static let batteryDual: UInt8 = 0x09
     static let batteryCase: UInt8 = 0x0a
     static let ambientV2: UInt8 = 0x17
+    // The WH-1000XM6 answers 66 17 with zeros in every mode and reports its state under 0x19 instead. Its
+    // SET stays 68 17.
+    static let ambientXM6: UInt8 = 0x19
     static let ambientV1: UInt8 = 0x02
+    static let equalizerStandard: UInt8 = 0x00
+    // WH-1000XM6: ten raw bands (0...12), no clear bass. It ACKs the 58 00 frame but ignores it.
+    static let equalizerTenBand: UInt8 = 0x04
     static let adaptiveVolume: UInt8 = 0x0a
     static let speakToChat: UInt8 = 0x0c
     static let generalSettingSlots: ClosedRange<UInt8> = 0xd1...0xd4
@@ -262,9 +286,11 @@ nonisolated enum SonyCommand {
     static let firmware: [UInt8] = [SonyOpcode.firmwareGet, 0x02]
     static let codec: [UInt8] = [SonyOpcode.codecGet, 0x02]
     static let autoPowerOff: [UInt8] = [SonyOpcode.autoPowerOffGet, 0x05]
-    static let equalizer: [UInt8] = [SonyOpcode.equalizerGet, 0x00]
+    static let equalizer: [UInt8] = [SonyOpcode.equalizerGet, SonySubtype.equalizerStandard]
+    static let tenBandEqualizer: [UInt8] = [SonyOpcode.equalizerGet, SonySubtype.equalizerTenBand]
     static let dsee: [UInt8] = [SonyOpcode.dseeGet, 0x01]
     static let ambientV2: [UInt8] = [SonyOpcode.ambientGet, SonySubtype.ambientV2]
+    static let ambientXM6: [UInt8] = [SonyOpcode.ambientGet, SonySubtype.ambientXM6]
     static let ambientV1: [UInt8] = [SonyOpcode.ambientGet, SonySubtype.ambientV1]
     static let supportFunctions: [UInt8] = [SonyOpcode.supportFunctionGet, 0x00]
 
@@ -280,8 +306,15 @@ nonisolated enum SonyCommand {
         [SonyOpcode.autoPowerOffSet, 0x05, option.code.0, option.code.1]
     }
 
-    static func setEqualizerPreset(_ preset: EqualizerPreset) -> [UInt8] {
-        [SonyOpcode.equalizerSet, 0x00, preset.rawValue, 0x00]
+    // 58 00 <preset> 00, or 58 04 <preset> 00 on the ten-band layout.
+    static func setEqualizerPreset(_ preset: EqualizerPreset, tenBand: Bool = false) -> [UInt8] {
+        [SonyOpcode.equalizerSet, tenBand ? SonySubtype.equalizerTenBand : SonySubtype.equalizerStandard, preset.rawValue, 0x00]
+    }
+
+    // 58 04 a0 <count> <bands>, raw steps clamped to 0...12, no clear bass (WH-1000XM6).
+    static func setTenBandEqualizer(bands: [Int]) -> [UInt8] {
+        [SonyOpcode.equalizerSet, SonySubtype.equalizerTenBand, EqualizerPreset.manual.rawValue, UInt8(bands.count)]
+            + bands.map { UInt8(max(0, min(12, $0))) }
     }
 
     // 58 00 a0 06 <clear bass+10> <5 bands +10>, values clamped to -10...10.
@@ -374,12 +407,15 @@ nonisolated enum SonyReply {
         return (Int(reply[2]), reply[3] == 0x01)
     }
 
-    // 23 09 <left> <left charging> <right> <right charging>
-    static func dualBattery(_ reply: [UInt8]) -> (left: Int, right: Int)? {
+    // 23 09|01 <left> <left charging> <right> <right charging>. The WF-1000XM5 sends two more bytes of unknown
+    // meaning, so the length is a lower bound. A level of 0 means that earbud is docked, not empty. Both 0 is
+    // still an answer (both in the case), so the caller doesn't go on to probe layouts that time out.
+    static func dualBattery(_ reply: [UInt8]) -> EarbudBatteryReading? {
         guard reply.count >= 6 else {
             return nil
         }
-        return (Int(reply[2]), Int(reply[4]))
+        return EarbudBatteryReading(left: reply[2] > 0 ? Int(reply[2]) : nil, leftCharging: reply[3] == 0x01,
+                                    right: reply[4] > 0 ? Int(reply[4]) : nil, rightCharging: reply[5] == 0x01)
     }
 
     // 57 00 <preset> [06 <clear bass+10> <5 bands +10>]
@@ -395,14 +431,28 @@ nonisolated enum SonyReply {
         return state
     }
 
+    // 57 04 <preset> <count> <bands>: raw steps 0...12, no bias, no clear bass (WH-1000XM6).
+    static func tenBandEqualizer(_ reply: [UInt8]) -> EqualizerState? {
+        guard reply.count >= 4, reply[1] == SonySubtype.equalizerTenBand else {
+            return nil
+        }
+        let count = Int(reply[3])
+        guard reply.count >= 4 + count else {
+            return nil
+        }
+        return EqualizerState(preset: reply[2], clearBass: nil, bands: reply[4..<(4 + count)].map { Int($0) })
+    }
+
     // e7 01 <enabled>
     static func dsee(_ reply: [UInt8]) -> Bool? {
         reply.count >= 3 ? reply[2] != 0 : nil
     }
 
-    // v2: 67 17 01 <on> <0 = NC, 1 = ambient> <voice> <level>
+    // v2: 67 17|19 01 <on> <0 = NC, 1 = ambient> <voice> <level> [...]. Byte [2] is always 01 in a real
+    // reply; anything else (like the WH-1000XM6's zeroed 67 17) is not state, and reading it as "off" snaps
+    // the UI back.
     static func ambientV2(_ reply: [UInt8]) -> AmbientReading? {
-        guard reply.count >= 7 else {
+        guard reply.count >= 7, reply[2] == 0x01 else {
             return nil
         }
         return AmbientReading(enabled: reply[3] != 0, ambient: reply[4] != 0, focusOnVoice: reply[5] != 0, level: Int(reply[6]))

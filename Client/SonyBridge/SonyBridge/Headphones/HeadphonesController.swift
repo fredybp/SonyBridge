@@ -57,6 +57,21 @@ final class HeadphonesController {
     var focusOnVoiceAvailable: Bool { ambientMode == .ambientSound && ambientLevel > 2 }
     var ambientWritable: Bool { isConnected && (!isV2 || ambientKnown) }
 
+    // Sony's true-wireless earbuds report a battery per earbud. Only picks the probe order: an unrecognized
+    // (renamed) headset still finds either layout, one timed-out read slower.
+    var looksLikeEarbuds: Bool {
+        let name = deviceName.lowercased()
+        return name.contains("wf-") || name.contains("linkbuds")
+    }
+
+    // The WH-1000XM6 reads noise control via 66 19 and has the ten-band equalizer (56/58 04).
+    var isWH1000XM6: Bool {
+        let name = deviceName.lowercased()
+        return name.contains("wh-1000xm6") || name.contains("wh1000xm6")
+    }
+
+    var tenBandEqualizer: Bool { isV2 && isWH1000XM6 }
+
     @ObservationIgnored var connection: MDRConnection?
     // Bumped on every connect and disconnect; async work from an older connection stops at its next check.
     @ObservationIgnored var generation = 0
@@ -264,20 +279,53 @@ final class HeadphonesController {
             return
         }
         let generation = self.generation
+        // Earbuds try the per-earbud layout first: some answer the single inquiry too (with a combined or zero
+        // level), and taking that answer would hide the left/right levels.
+        let earbuds = looksLikeEarbuds
+        if earbuds {
+            guard await !refreshEarbudBattery(generation) else { return }
+        }
         let singleReply = await read(SonyCommand.battery(SonySubtype.batterySingle), SonyOpcode.batteryReply, SonySubtype.batterySingle)
         guard isCurrent(generation) else { return }
         if let single = SonyReply.battery(singleReply) {
             battery = BatteryStatus(level: single.level, charging: single.charging)
             return
         }
-        // TWS earbuds: left/right and the case.
-        let dualReply = await read(SonyCommand.battery(SonySubtype.batteryDual), SonyOpcode.batteryReply, SonySubtype.batteryDual)
-        let caseReply = await read(SonyCommand.battery(SonySubtype.batteryCase), SonyOpcode.batteryReply, SonySubtype.batteryCase)
-        guard isCurrent(generation), let dual = SonyReply.dualBattery(dualReply) else {
-            return
+        // A renamed headset that turned out to be earbuds after all.
+        if !earbuds {
+            _ = await refreshEarbudBattery(generation)
         }
-        battery = BatteryStatus(level: min(dual.left, dual.right), charging: false, left: dual.left, right: dual.right,
-                                caseLevel: SonyReply.battery(caseReply)?.level)
+    }
+
+    // Left/right (dual, then dual2) and the case. False if the headset answered neither layout.
+    private func refreshEarbudBattery(_ generation: Int) async -> Bool {
+        var reading: EarbudBatteryReading?
+        for subType in [SonySubtype.batteryDual, SonySubtype.batteryDual2] {
+            let reply = await read(SonyCommand.battery(subType), SonyOpcode.batteryReply, subType)
+            guard isCurrent(generation) else { return true }
+            reading = SonyReply.dualBattery(reply)
+            if reading != nil {
+                break
+            }
+        }
+        guard let reading else {
+            return false
+        }
+        let caseReply = await read(SonyCommand.battery(SonySubtype.batteryCase), SonyOpcode.batteryReply, SonySubtype.batteryCase)
+        guard isCurrent(generation) else { return true }
+        var status = BatteryStatus(level: nil, charging: reading.leftCharging || reading.rightCharging, earbuds: true,
+                                   left: reading.left, leftCharging: reading.leftCharging,
+                                   right: reading.right, rightCharging: reading.rightCharging,
+                                   caseLevel: battery?.caseLevel, caseCharging: battery?.caseCharging ?? false)
+        // The headline is the emptier earbud of those reporting.
+        status.level = [reading.left, reading.right].compactMap { $0 }.min()
+        // The case reports 0 while it isn't talking to the earbuds: keep the last level it gave.
+        if let caseReading = SonyReply.battery(caseReply), caseReading.level > 0 {
+            status.caseLevel = caseReading.level
+            status.caseCharging = caseReading.charging
+        }
+        battery = status
+        return true
     }
 
     func refreshEqualizer() async {
@@ -285,6 +333,14 @@ final class HeadphonesController {
             return
         }
         let generation = self.generation
+        if tenBandEqualizer {
+            let reply = await read(SonyCommand.tenBandEqualizer, SonyOpcode.equalizerReply, SonySubtype.equalizerTenBand)
+            guard isCurrent(generation), let state = SonyReply.tenBandEqualizer(reply) else {
+                return
+            }
+            equalizer = state
+            return
+        }
         let reply = await read(SonyCommand.equalizer, SonyOpcode.equalizerReply)
         guard isCurrent(generation), let state = SonyReply.equalizer(reply) else {
             return
@@ -312,7 +368,9 @@ final class HeadphonesController {
             return
         }
         let generation = self.generation
-        let reply = await read(SonyCommand.ambientV2, SonyOpcode.ambientReply)
+        // The sub-type is matched too: 0x67 also carries notifications with a different layout.
+        let subType = isWH1000XM6 ? SonySubtype.ambientXM6 : SonySubtype.ambientV2
+        let reply = await read(isWH1000XM6 ? SonyCommand.ambientXM6 : SonyCommand.ambientV2, SonyOpcode.ambientReply, subType)
         guard isCurrent(generation), let reading = SonyReply.ambientV2(reply) else {
             return
         }
@@ -390,8 +448,8 @@ final class HeadphonesController {
         let payload = message.payload
         switch (message.dataType, message.command) {
         case (MDRFrame.dataMDR, SonyOpcode.batteryNotify):
-            // Same layout as the battery reply.
-            if message.subType == SonySubtype.batterySingle, let single = SonyReply.battery(payload) {
+            // Same layout as the battery reply. Never replaces an earbuds status with a single level.
+            if message.subType == SonySubtype.batterySingle, battery?.earbuds != true, let single = SonyReply.battery(payload) {
                 battery = BatteryStatus(level: single.level, charging: single.charging)
             }
         case (MDRFrame.dataMDRNo2, SonyOpcode.peripheralNotify):

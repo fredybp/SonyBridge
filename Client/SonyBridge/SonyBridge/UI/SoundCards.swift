@@ -60,20 +60,19 @@ struct EqualizerCard: View {
     @Environment(HeadphonesController.self) private var headphones
 
     private static let bandLabels = ["400", "1k", "2.5k", "6.3k", "16k"]
+    private static let tenBandLabels = ["31", "63", "125", "250", "500", "1k", "2k", "4k", "8k", "16k"]
 
     var body: some View {
+        let tenBand = headphones.tenBandEqualizer
         Card("Equalizer") {
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
-                ForEach(EqualizerPreset.allCases) { preset in
+                ForEach(presets, id: \.self) { preset in
                     let selected = headphones.equalizer?.preset == preset.rawValue
                     Button {
-                        if preset == .manual {
-                            applyManual()
-                        } else {
-                            headphones.setEqualizerPreset(preset)
-                        }
+                        // Manual too: the headset restores its stored curve, which is read back.
+                        headphones.setEqualizerPreset(preset)
                     } label: {
-                        Text(preset.title)
+                        Text(tenBand && preset == .manual ? "Custom" : preset.title)
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(SelectableTileStyle(selected: selected))
@@ -83,35 +82,44 @@ struct EqualizerCard: View {
 
             if headphones.equalizer?.preset == EqualizerPreset.manual.rawValue {
                 Divider()
-                ForEach(0..<5, id: \.self) { index in
-                    bandRow(Self.bandLabels[index], value: bands[index]) { value in
+                let labels = tenBand ? Self.tenBandLabels : Self.bandLabels
+                ForEach(0..<min(bands.count, labels.count), id: \.self) { index in
+                    bandRow(labels[index], value: bands[index], raw: tenBand) { value in
                         var newBands = bands
                         newBands[index] = value
                         headphones.setCustomEqualizer(clearBass: clearBass, bands: newBands)
                     }
                 }
-                bandRow("Clear Bass", value: clearBass) { value in
-                    headphones.setCustomEqualizer(clearBass: value, bands: bands)
+                if !tenBand {
+                    bandRow("Clear Bass", value: clearBass, raw: false) { value in
+                        headphones.setCustomEqualizer(clearBass: value, bands: bands)
+                    }
                 }
             }
         }
     }
 
-    private var bands: [Int] { headphones.equalizer?.bands ?? [0, 0, 0, 0, 0] }
-    private var clearBass: Int { headphones.equalizer?.clearBass ?? 0 }
-
-    private func applyManual() {
-        headphones.setCustomEqualizer(clearBass: clearBass, bands: bands)
+    // The WH-1000XM6 has confirmed codes only for Off and Custom on its ten-band layout; the five-band preset
+    // codes don't apply to it.
+    private var presets: [EqualizerPreset] {
+        headphones.tenBandEqualizer ? [.off, .manual] : EqualizerPreset.allCases
     }
 
-    private func bandRow(_ label: String, value: Int, set: @escaping @MainActor (Int) -> Void) -> some View {
+    private var bands: [Int] {
+        headphones.equalizer?.bands ?? Array(repeating: headphones.tenBandEqualizer ? 6 : 0,
+                                             count: headphones.tenBandEqualizer ? 10 : 5)
+    }
+    private var clearBass: Int { headphones.equalizer?.clearBass ?? 0 }
+
+    // raw: the ten-band layout's 0...12 device steps (no dB mapping is known), shown unsigned.
+    private func bandRow(_ label: String, value: Int, raw: Bool, set: @escaping @MainActor (Int) -> Void) -> some View {
         HStack(spacing: 10) {
             Text(label)
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .frame(width: 64, alignment: .leading)
-            Slider(value: Binding(get: { Double(value) }, set: { set(Int($0.rounded())) }), in: -10...10, step: 1)
-            Text(value > 0 ? "+\(value)" : "\(value)")
+            Slider(value: Binding(get: { Double(value) }, set: { set(Int($0.rounded())) }), in: raw ? 0...12 : -10...10, step: 1)
+            Text(raw || value <= 0 ? "\(value)" : "+\(value)")
                 .font(.caption.monospacedDigit())
                 .frame(width: 28, alignment: .trailing)
         }

@@ -130,8 +130,10 @@ private struct HeaderView: View {
 
             HStack(spacing: 6) {
                 if let battery = headphones.battery {
-                    Image(systemName: battery.charging ? "battery.100.bolt" : BatteryIcon.symbol(for: battery.level))
-                        .foregroundStyle(battery.level <= 20 ? .red : .secondary)
+                    if let level = battery.level {
+                        Image(systemName: battery.charging ? "battery.100.bolt" : BatteryIcon.symbol(for: level))
+                            .foregroundStyle(level <= 20 && !battery.charging ? .red : .secondary)
+                    }
                     Text(BatteryIcon.text(for: battery))
                 } else {
                     Text("Connected")
@@ -164,12 +166,21 @@ enum BatteryIcon {
         }
     }
 
-    // "80%", "80% charging", or "L 80% · R 75%" for earbuds.
+    // "80%", "80% charging", or for earbuds "L 80% · R 75%", "L 80% · R in case", "In the case".
     static func text(for battery: BatteryStatus) -> String {
-        if let left = battery.left, let right = battery.right {
-            return "L \(left)% · R \(right)%"
+        guard battery.earbuds else {
+            return "\(battery.level ?? 0)%" + (battery.charging ? " charging" : "")
         }
-        return "\(battery.level)%" + (battery.charging ? " charging" : "")
+        guard battery.left != nil || battery.right != nil else {
+            return "In the case"
+        }
+        func earbud(_ side: String, _ level: Int?, _ charging: Bool) -> String {
+            guard let level else {
+                return "\(side) in case"
+            }
+            return "\(side) \(level)%" + (charging ? " charging" : "")
+        }
+        return earbud("L", battery.left, battery.leftCharging) + " · " + earbud("R", battery.right, battery.rightCharging)
     }
 }
 
